@@ -1,6 +1,7 @@
 import numpy as np
 from chain_reaction import ChainReactionGame
 import time
+import heapq
 ROWS, COLS = 12, 8
 MAX_BRANCHES = 20 # cap for branches in early game
 _GAME = ChainReactionGame() # dummy, for utility
@@ -45,8 +46,8 @@ def score_move(owners, orbs, move, player_id):
 # return moves sorted by move_score
 def get_ordered_moves(owners, orbs, player_id):
     moves = get_valid_moves(owners, player_id)
-    moves = sorted(moves, key=lambda move : score_move(owners, orbs, move, player_id), reverse=True)
-    return moves
+    best_moves = heapq.nlargest(MAX_BRANCHES, moves)
+    return best_moves
 
 
 
@@ -57,7 +58,7 @@ def state_to_numpy(state) :
 
     for r in range(ROWS):
         for c in range(COLS):
-            owner, orbs_cell = state[r, c]
+            owner, orbs_cell = state[r][c]
             if owner is not None:
                 owners[r,c] = owner
                 orbs[r, c] = orbs_cell
@@ -144,26 +145,20 @@ def check_winner(owners, player_id):
 
 # Evaluate how good the position is 
 def evaluate(owners, orbs, player_id):
-    cell_diff = np.sum(owners == player_id)-np.sum(owners == 1 - player_id)
-    orb_diff = 0
-    volatility_diff = 0.0
+    my_cells = (owners == player_id)
+    opp_cells = (owners == 1 - player_id)
+    cell_diff = np.sum(my_cells) - np.sum(opp_cells)
+    orb_diff = np.sum(orbs[my_cells]) - np.sum(orbs[opp_cells])
+
+    volatility = orbs / CAPACITY
+    volatility_diff = np.sum(volatility[my_cells]) - np.sum(volatility[opp_cells])
+
     threat_score = 0 # how much offensive pressure I am exerting
     danger_score = 0 # how much offensive pressure is being exerted on me
     for r in range(ROWS):
         for c in range(COLS):
             owner, _orbs = owners[r][c], orbs[r][c]
             if owner != -1:
-                if owner == player_id:
-                    orb_diff += _orbs
-                    volatility_diff += _orbs/CAPACITY[r][c]
-                else :
-                    orb_diff -= _orbs
-                    volatility_diff -= _orbs/CAPACITY[r][c]
-                    # acceptable heuristic for volatility
-               
-                # heuristic for threat and danger should be 
-                # cell_capacity - orb_count <= 1
-                # ? How many more orbs need to be placed before it is bad for me
                 if (owner == player_id) :
                     if CAPACITY[r][c] - _orbs <= 1:
                         # I own this, add to threat
@@ -217,7 +212,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     moves = get_ordered_moves(owners, orbs, current_player) 
     if maximizing:
         best = float('-inf')
-        for move in moves[:MAX_BRANCHES]:
+        for move in moves:
             owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, False)
             best = max(best, score)
@@ -227,7 +222,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     else : 
         worst = float('inf') # worst for maximizer. 
         # enemy always playing best possible moves
-        for move in moves[:MAX_BRANCHES]:
+        for move in moves:
             owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
             worst = min(worst, score)
@@ -244,7 +239,7 @@ def get_move(state, player_id : int):
     best_score = float('-inf')
     t0 = time.time()
     depth = 3 
-    moves = get_ordered_moves(owners, orbs, player_id)[:MAX_BRANCHES]
+    moves = get_ordered_moves(owners, orbs, player_id)
     for move in moves:
         owners_copy, orbs_copy = apply_move_fast(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
