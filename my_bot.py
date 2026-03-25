@@ -15,7 +15,40 @@ for r in range(ROWS):
     for c in range(COLS):
         NEIGHBOURS[(r,c)] = _GAME.neighbors(r, c)
 
-# === HELPER FUNCTION FOR NUMPY ===
+# === HELPER FUNCTION ===
+# evaluate a potential move and return score of it
+def score_move(owners, orbs, move, player_id):
+    # assume am receiving a valid move
+    final_score = 0 
+    r, c = move
+    if orbs[r][c] >= CAPACITY[r][c] - 1:
+        final_score += 300
+        # check if this explosion is near opponents 
+        for nr, nc in NEIGHBOURS[(r,c)]:
+            if owners[nr][nc] == 1 - player_id:
+               if orbs[nr][nc] >= CAPACITY[nr][nc] - 1:
+                   final_score += 200
+    else : 
+        for nr, nc in NEIGHBOURS[(r,c)]:
+            if owners[nr][nc] == 1 - player_id:
+                if orbs[nr][nc] >= CAPACITY[nr][nc] - 1:
+                    final_score -= 50 
+                    # penalise for opponents near explosion but I am not
+    
+    if CAPACITY[r][c] == 2:
+        final_score += 100 # reward corner
+    elif CAPACITY[r][c] == 3:
+        final_score += 50 # somewhat reward edge
+    return final_score
+
+# return moves sorted by move_score
+def get_ordered_moves(owners, orbs, player_id):
+    moves = get_valid_moves(owners, player_id)
+    sorted(moves, key=lambda move : score_move(owners, orbs, move, player_id), reverse=True)
+    return moves
+
+
+
 # Convert current board to two numpy arrays, owners and orbs
 def state_to_numpy(state) : 
     owners = np.full((ROWS, COLS), -1, dtype=np.int8)
