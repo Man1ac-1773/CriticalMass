@@ -2,6 +2,7 @@ import numpy as np
 from chain_reaction import ChainReactionGame
 import time
 ROWS, COLS = 12, 8
+MAX_BRANCHES = 2 # cap for branches in early game
 _GAME = ChainReactionGame() # dummy, for utility
 # precompute with _GAME to reduce overhead 
 CAPACITY = np.zeros((ROWS, COLS), dtype=np.int8)
@@ -116,19 +117,19 @@ def evaluate(owners, orbs, player_id):
             if owner != -1:
                 if owner == player_id:
                     orb_diff += _orbs
-                    volatility_diff += _orbs/_GAME.capacity(r,c)
+                    volatility_diff += _orbs/CAPACITY[r][c]
                 else :
                     orb_diff -= _orbs
-                    volatility_diff -= _orbs/_GAME.capacity(r,c)
+                    volatility_diff -= _orbs/CAPACITY[r][c]
                     # acceptable heuristic for volatility
                
                 # heuristic for threat and danger should be 
                 # cell_capacity - orb_count <= 1
                 # ? How many more orbs need to be placed before it is bad for me
                 if (owner == player_id) :
-                    if _GAME.capacity(r,c) - _orbs <= 1:
+                    if CAPACITY[r][c] - _orbs <= 1:
                         # I own this, add to threat
-                        for r1, c1 in _GAME.neighbors(r,c):
+                        for r1, c1 in NEIGHBOURS[(r,c)]:
                             if owners[r1][c1] != -1 :
                                 if owners[r1][c1] == 1 - player_id:
                                     # belongs to opponent
@@ -136,8 +137,8 @@ def evaluate(owners, orbs, player_id):
 
                 elif owner == 1 - player_id:
                    # I don't own, add to dange
-                    if _GAME.capacity(r,c) - _orbs <= 1:
-                        for r1, c1 in _GAME.neighbors(r,c):
+                    if CAPACITY[r][c] - _orbs <= 1:
+                        for r1, c1 in NEIGHBOURS[(r,c)]:
                             if owners[r1][c1] != -1 :
                                 if owners[r1][c1] == player_id:
                                     # belongs to me 
@@ -174,10 +175,10 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     
     opponent = 1 - player_id
     current_player = player_id if maximizing else opponent
-    moves = get_valid_moves(owners, current_player) 
+    moves = get_ordered_moves(owners, orbs,current_player) 
     if maximizing:
         best = float('-inf')
-        for move in moves:
+        for move in moves[:MAX_BRANCHES]:
             owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, False)
             best = max(best, score)
@@ -203,7 +204,8 @@ def get_move(state, player_id : int):
     best_score = float('-inf')
     t0 = time.time()
     depth = 2 
-    moves = get_valid_moves(owners, player_id)
+    moves = get_ordered_moves(owners, orbs, player_id)[:MAX_BRANCHES]
+    print(moves)
     for move in moves:
         owners_copy, orbs_copy = apply_move_numpy(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
