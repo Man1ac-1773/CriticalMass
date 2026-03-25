@@ -2,7 +2,7 @@ import numpy as np
 from chain_reaction import ChainReactionGame
 import time
 ROWS, COLS = 12, 8
-MAX_BRANCHES = 2 # cap for branches in early game
+MAX_BRANCHES = 20 # cap for branches in early game
 _GAME = ChainReactionGame() # dummy, for utility
 # precompute with _GAME to reduce overhead 
 CAPACITY = np.zeros((ROWS, COLS), dtype=np.int8)
@@ -45,7 +45,7 @@ def score_move(owners, orbs, move, player_id):
 # return moves sorted by move_score
 def get_ordered_moves(owners, orbs, player_id):
     moves = get_valid_moves(owners, player_id)
-    sorted(moves, key=lambda move : score_move(owners, orbs, move, player_id), reverse=True)
+    moves = sorted(moves, key=lambda move : score_move(owners, orbs, move, player_id), reverse=True)
     return moves
 
 
@@ -175,7 +175,8 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     
     opponent = 1 - player_id
     current_player = player_id if maximizing else opponent
-    moves = get_ordered_moves(owners, orbs,current_player) 
+    # IMP : EVALUATING MOVES WRT CURRENT PLAYER
+    moves = get_ordered_moves(owners, orbs, current_player) 
     if maximizing:
         best = float('-inf')
         for move in moves[:MAX_BRANCHES]:
@@ -186,8 +187,9 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
             if beta <= alpha : break
         return best
     else : 
-        worst = float('inf')
-        for move in moves:
+        worst = float('inf') # worst for maximizer. 
+        # enemy always playing best possible moves
+        for move in moves[:MAX_BRANCHES]:
             owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
             worst = min(worst, score)
@@ -203,9 +205,8 @@ def get_move(state, player_id : int):
     best_move = None
     best_score = float('-inf')
     t0 = time.time()
-    depth = 2 
+    depth = 3 
     moves = get_ordered_moves(owners, orbs, player_id)[:MAX_BRANCHES]
-    print(moves)
     for move in moves:
         owners_copy, orbs_copy = apply_move_numpy(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
