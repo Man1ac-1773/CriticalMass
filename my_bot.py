@@ -1,7 +1,20 @@
 import numpy as np
-from chain_reaction import ChainReactionGame 
+from chain_reaction import ChainReactionGame
+import time
 ROWS, COLS = 12, 8
 _GAME = ChainReactionGame() # dummy, for utility
+# precompute with _GAME to reduce overhead 
+CAPACITY = np.zeros((ROWS, COLS), dtype=np.int8)
+for r in range(ROWS):
+    for c in range(COLS):
+        CAPACITY[r][c] = _GAME.capacity(r, c)
+
+# neighbours as a dict 
+NEIGHBOURS = {}
+for r in range(ROWS):
+    for c in range(COLS):
+        NEIGHBOURS[(r,c)] = _GAME.neighbors(r, c)
+
 # === HELPER FUNCTION FOR NUMPY ===
 # Convert current board to two numpy arrays, owners and orbs
 def state_to_numpy(state) : 
@@ -74,10 +87,13 @@ def evaluate(owners, orbs, player_id):
                 else :
                     orb_diff -= _orbs
                     volatility_diff -= _orbs/_GAME.capacity(r,c)
-
-                
+                    # acceptable heuristic for volatility
+               
+                # heuristic for threat and danger should be 
+                # cell_capacity - orb_count <= 1
+                # ? How many more orbs need to be placed before it is bad for me
                 if (owner == player_id) :
-                    if _orbs/_GAME.capacity(r,c) >= 0.75:
+                    if _GAME.capacity(r,c) - _orbs <= 1:
                         # I own this, add to threat
                         for r1, c1 in _GAME.neighbors(r,c):
                             if owners[r1][c1] != -1 :
@@ -85,9 +101,9 @@ def evaluate(owners, orbs, player_id):
                                     # belongs to opponent
                                     threat_score+=1
 
-                elif owner == 1- player_id:
-                   # I don't own, add to danger
-                    if _orbs/_GAME.capacity(r,c) >= 0.75:
+                elif owner == 1 - player_id:
+                   # I don't own, add to dange
+                    if _GAME.capacity(r,c) - _orbs <= 1:
                         for r1, c1 in _GAME.neighbors(r,c):
                             if owners[r1][c1] != -1 :
                                 if owners[r1][c1] == player_id:
@@ -104,8 +120,10 @@ def evaluate(owners, orbs, player_id):
     vol_weight = 1.5
     _vol_score = vol_weight * (volatility_diff/96)
     # magic number 96 comes from all cells at max volatility
-    threat_score /= 384; danger_score /= 384 # magic numbers from hypothetical max
-    _threat_weight = 1.5; _danger_weight = 1.5
+    # for each cell which is my neighbour, my threat can be max one per cell
+    # what should my max be for scaling?
+    threat_score /= 96; danger_score /= 96 
+    _threat_weight = 2.5; _danger_weight = 2.5
     threat_score *= _threat_weight; danger_score *= _danger_weight
     final_score = _cell_score + _orb_score + _vol_score - danger_score + threat_score
     return final_score
@@ -113,7 +131,7 @@ def evaluate(owners, orbs, player_id):
 
 # Do minimax yayy
 def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
-    win = check_winner(owners, player_id) 
+    win = check_winner(owners, player_id)
     if win is not None:
         if win: 
             return 10000
@@ -127,8 +145,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     if maximizing:
         best = float('-inf')
         for move in moves:
-            owners_copy, orbs_copy = owners.copy(), orbs.copy()
-            apply_move_numpy(owners_copy, orbs_copy, player_id, move)
+            owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, False)
             best = max(best, score)
             alpha = max(alpha, best)
@@ -137,8 +154,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     else : 
         worst = float('inf')
         for move in moves:
-            owners_copy, orbs_copy = owners.copy(), orbs.copy()
-            apply_move_numpy(owners_copy, orbs_copy, player_id, move)
+            owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
             worst = min(worst, score)
             beta = min(beta, worst)
@@ -148,15 +164,19 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
 
 
 # actual function called
-def get_move(state , player_id : int):
+def get_move(state, player_id : int):
     owners, orbs = state_to_numpy(state) 
     best_move = None
     best_score = float('-inf')
-    for move in get_valid_moves(owners, player_id):
-        owners_copy, orbs_copy = owners.copy(), orbs.copy()
-        apply_move_numpy(owners_copy, orbs_copy, player_id, move)
-        score = minimax(owners_copy, orbs_copy, player_id, 3, float('-inf'), float('inf'), False)
+    t0 = time.time()
+    depth = 2 
+    moves = get_valid_moves(owners, player_id)
+    for move in moves:
+        owners_copy, orbs_copy = apply_move_numpy(owners, orbs, player_id, move)
+        score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
         if score > best_score:
             best_score = score
             best_move = move
+    elapsed = time.time() - t0
+    print(f"Depth = {depth}, {len(moves)} moves, Time elapsed : {elapsed:.3f}s")
     return best_move
