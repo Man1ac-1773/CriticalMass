@@ -55,12 +55,12 @@ def state_to_numpy(state) :
     owners = np.full((ROWS, COLS), -1, dtype=np.int8)
     orbs = np.zeros((ROWS, COLS), dtype=np.int8)
 
-    for r in range(len(state)):
-        for c in range(len(state[r])):
-            owner, orbs_cell = state[r][c]
+    for r in range(ROWS):
+        for c in range(COLS):
+            owner, orbs_cell = state[r, c]
             if owner is not None:
-                owners[r][c] = owner
-                orbs[r][c] = orbs_cell
+                owners[r,c] = owner
+                orbs[r, c] = orbs_cell
     return owners, orbs
 
 # Convert numpy representation of board to state 
@@ -69,22 +69,60 @@ def numpy_to_state(owners, orbs):
     for r in range(ROWS):
         layer = []
         for c in range(COLS):
-            if owners[r][c] == -1 : 
-                layer.append((None, orbs[r][c]))
+            if owners[r, c] == -1 : 
+                layer.append((None, orbs[r,c]))
             else :
-                layer.append((owners[r][c], orbs[r][c]))
+                layer.append((owners[r,c], orbs[r,c]))
             
         state.append(layer)
     return state
 
-def apply_move_numpy(owners, orbs, player_id, move):
-    state = numpy_to_state(owners, orbs)
-    game = ChainReactionGame()
-    game.board = state
-    game.moves_played = {0 : 1, 1 : 1}
-    game.apply_move(player_id, move)
-    new_owners, new_orbs = state_to_numpy(game.board)
-    return new_owners, new_orbs
+
+# simulating moves and board without calling ChainReactionGame
+def apply_move_fast(owners, orbs, player, move):
+    owners = owners.copy()
+    orbs = orbs.copy()
+    stack = [move]
+    r, c = move
+    owners[r, c] = player
+    orbs[r, c] += 1
+
+    if orbs[r, c] < CAPACITY[r, c]:
+        return owners, orbs
+
+    stack.append((r, c))
+
+    while stack:
+        cr, cc = stack.pop()
+
+        cur_count = orbs[cr, cc]
+        cap = CAPACITY[cr, cc]
+
+        if cur_count < cap:
+            continue
+
+        exploding_owner = owners[cr, cc]
+
+        remaining = cur_count - cap
+
+        if remaining > 0:
+            orbs[cr, cc] = remaining
+            if remaining >= cap:
+                stack.append((cr, cc))
+        else:
+            orbs[cr, cc] = 0
+            owners[cr, cc] = -1  # empty
+
+        for nr, nc in NEIGHBOURS[(cr, cc)]:
+            owners[nr, nc] = exploding_owner
+            orbs[nr, nc] += 1
+
+            # ONLY push when it reaches threshold (important optimization)
+            if orbs[nr, nc] >= CAPACITY[nr, nc]:
+                stack.append((nr, nc))
+
+    return owners, orbs
+
 
 def get_valid_moves(owners, player_id):
     moves = []
@@ -180,7 +218,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     if maximizing:
         best = float('-inf')
         for move in moves[:MAX_BRANCHES]:
-            owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
+            owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, False)
             best = max(best, score)
             alpha = max(alpha, best)
@@ -190,7 +228,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
         worst = float('inf') # worst for maximizer. 
         # enemy always playing best possible moves
         for move in moves[:MAX_BRANCHES]:
-            owners_copy, orbs_copy = apply_move_numpy(owners, orbs, current_player, move)
+            owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
             worst = min(worst, score)
             beta = min(beta, worst)
@@ -208,7 +246,7 @@ def get_move(state, player_id : int):
     depth = 3 
     moves = get_ordered_moves(owners, orbs, player_id)[:MAX_BRANCHES]
     for move in moves:
-        owners_copy, orbs_copy = apply_move_numpy(owners, orbs, player_id, move)
+        owners_copy, orbs_copy = apply_move_fast(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
         if score > best_score:
             best_score = score
