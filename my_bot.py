@@ -11,6 +11,8 @@ for r in range(ROWS):
     for c in range(COLS):
         CAPACITY[r][c] = _GAME.capacity(r, c)
 
+INV_CAPACITY = 1/CAPACITY
+
 # neighbours as a dict 
 NEIGHBOURS = {}
 for r in range(ROWS):
@@ -46,8 +48,10 @@ def score_move(owners, orbs, move, player_id):
 # return moves sorted by move_score
 def get_ordered_moves(owners, orbs, player_id):
     moves = get_valid_moves(owners, player_id)
-    best_moves = heapq.nlargest(MAX_BRANCHES, moves)
-    return best_moves
+    best_moves = heapq.nlargest(MAX_BRANCHES, moves, lambda m : score_move(owners, orbs, m, player_id) )
+    worst_moves = best_moves = heapq.nlargest(MAX_BRANCHES, moves, lambda m : score_move(owners, orbs, m, player_id) )
+
+    return best_moves, worst_moves
 
 
 
@@ -150,7 +154,7 @@ def evaluate(owners, orbs, player_id):
     cell_diff = np.sum(my_cells) - np.sum(opp_cells)
     orb_diff = np.sum(orbs[my_cells]) - np.sum(orbs[opp_cells])
 
-    volatility = orbs / CAPACITY
+    volatility = orbs * INV_CAPACITY # minor improvement 
     volatility_diff = np.sum(volatility[my_cells]) - np.sum(volatility[opp_cells])
 
     threat_score = 0 # how much offensive pressure I am exerting
@@ -209,10 +213,13 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     opponent = 1 - player_id
     current_player = player_id if maximizing else opponent
     # IMP : EVALUATING MOVES WRT CURRENT PLAYER
-    moves = get_ordered_moves(owners, orbs, current_player) 
+    moves = get_ordered_moves(owners, orbs, player_id)
+    # 0 index is best_move => use if maximizing
+    # 1 index is worst moves => use if minimizing
     if maximizing:
+        
         best = float('-inf')
-        for move in moves:
+        for move in moves[0]:
             owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, False)
             best = max(best, score)
@@ -222,7 +229,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
     else : 
         worst = float('inf') # worst for maximizer. 
         # enemy always playing best possible moves
-        for move in moves:
+        for move in moves[1]:
             owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
             worst = min(worst, score)
@@ -239,7 +246,7 @@ def get_move(state, player_id : int):
     best_score = float('-inf')
     t0 = time.time()
     depth = 3 
-    moves = get_ordered_moves(owners, orbs, player_id)
+    moves = get_ordered_moves(owners,orbs, player_id)
     for move in moves:
         owners_copy, orbs_copy = apply_move_fast(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
