@@ -21,7 +21,7 @@ for r in range(ROWS):
 
 # === HELPER FUNCTION ===
 # evaluate a potential move and return score of it
-def score_move(owners, orbs, move, player_id):
+def score_move(owners, orbs, move, player_id : int):
     # assume am receiving a valid move
     final_score = 0 
     r, c = move
@@ -46,7 +46,7 @@ def score_move(owners, orbs, move, player_id):
     return final_score
 
 # return moves sorted by move_score
-def get_ordered_moves(owners, orbs, player_id):
+def get_ordered_moves(owners, orbs, player_id: int):
     moves = get_valid_moves(owners, player_id)
     best_moves = heapq.nlargest(MAX_BRANCHES, moves, lambda m : score_move(owners, orbs, m, player_id) )
     worst_moves = best_moves = heapq.nlargest(MAX_BRANCHES, moves, lambda m : score_move(owners, orbs, m, player_id) )
@@ -84,7 +84,7 @@ def numpy_to_state(owners, orbs):
 
 
 # simulating moves and board without calling ChainReactionGame
-def apply_move_fast(owners, orbs, player, move):
+def apply_move_fast(owners, orbs, player : int, move : tuple[int, int]):
     owners = owners.copy()
     orbs = orbs.copy()
     stack = [move]
@@ -129,7 +129,7 @@ def apply_move_fast(owners, orbs, player, move):
     return owners, orbs
 
 
-def get_valid_moves(owners, player_id):
+def get_valid_moves(owners, player_id : int):
     moves = []
     for r in range(ROWS):
         for c in range(COLS):
@@ -137,7 +137,7 @@ def get_valid_moves(owners, player_id):
                 moves.append((r,c))
     return moves
 
-def check_winner(owners, player_id):
+def check_winner(owners, player_id : int):
     a = np.sum(owners == player_id)
     b = np.sum(owners == 1 - player_id)
     if a > 0 and b == 0 : return True
@@ -228,7 +228,7 @@ def minimax(owners, orbs, player_id, depth, alpha, beta, maximizing):
         return best
     else : 
         worst = float('inf') # worst for maximizer. 
-        # enemy always playing best possible moves
+        # enemy always playing best possible moves for himself,
         for move in moves[1]:
             owners_copy, orbs_copy = apply_move_fast(owners, orbs, current_player, move)
             score = minimax(owners_copy, orbs_copy, player_id, depth-1, alpha, beta, True)
@@ -247,12 +247,12 @@ def get_move(state, player_id : int):
     t0 = time.time()
     depth = 3 
     moves = get_ordered_moves(owners,orbs, player_id)
-    for move in moves:
+    for move in moves[0]:
         owners_copy, orbs_copy = apply_move_fast(owners, orbs, player_id, move)
         score = minimax(owners_copy, orbs_copy, player_id, depth, float('-inf'), float('inf'), False)
         if score > best_score:
             best_score = score
             best_move = move
     elapsed = time.time() - t0
-    print(f"Depth = {depth}, {len(moves)} moves, Time elapsed : {elapsed:.3f}s")
+    print(f"Depth = {depth}, {len(moves[0])} moves, Time elapsed : {elapsed:.3f}s")
     return best_move

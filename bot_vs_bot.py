@@ -1,7 +1,7 @@
 from chain_reaction import ChainReactionGame
 
 # Pick which bots to run by changing these imports
-import dummy_bot as bot0
+import random_bot as bot0
 import my_bot as bot1
 import time
 
