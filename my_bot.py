@@ -270,14 +270,16 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     opponent = 1 - player_id
     current_player = player_id if maximizing else opponent
     alpha_orig = alpha
+    beta_orig = beta
     # IMP : EVALUATING MOVES WRT CURRENT PLAYER
     moves = get_valid_moves(owners, current_player)
+    tt_move = None
     if entry and entry[3] in moves:
+        tt_move = entry[3]
         moves.remove(entry[3])
-        moves.insert(0, entry[3])
-    moves = get_ordered_moves(owners, orbs, moves, current_player, maximizing)
+    moves = get_ordered_moves(owners, orbs, moves, player_id, maximizing)
+    if tt_move : moves.insert(0, tt_move)
     best_move = None
-    best = 0
     if maximizing:
         
         best = float('-inf')
@@ -288,7 +290,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             if (score > best):
                 best = score
                 best_move = move
-            alpha = max(alpha, score)
+            alpha = max(alpha, best)
             if (beta <= alpha):
                 break
     else : 
@@ -307,7 +309,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     # store TT
     if best <= alpha_orig:
         flag = "UPPER"
-    elif best >= beta:
+    elif best >= beta_orig:
         flag = "LOWER"
     else : 
         flag = "EXACT"
