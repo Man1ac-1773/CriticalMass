@@ -99,35 +99,39 @@ def state_to_numpy(state) :
     return owners, orbs
 
 
-# simulating moves and board and updating hash_key 
-def apply_move_fast(owners, orbs, hash_key, player, move):
-    owners = owners.copy()
-    orbs = orbs.copy()
+# inplace editing wrt move and updating hash 
+def make_move(owners, orbs, hash_key, player, move):
+    changes = []
     h = hash_key
 
     stack = [move]
 
+    def apply_cell(r, c, new_owner, new_orb):
+        nonlocal h
+
+        old_owner = owners[r, c]
+        old_orb = orbs[r, c]
+
+        changes.append((r, c, old_owner, old_orb))
+
+        # remove old hash
+        h ^= zobrist_cell(r, c, old_owner, old_orb)
+
+        # apply
+        owners[r, c] = new_owner
+        orbs[r, c] = new_orb
+
+        # add new hash
+        h ^= zobrist_cell(r, c, new_owner, new_orb)
+
     r, c = move
 
-    # ===== initial placement =====
-    old_owner = owners[r, c]
-    old_orb = orbs[r, c]
+    # initial placement
+    apply_cell(r, c, player, orbs[r, c] + 1)
 
-    # remove old hash
-    h ^= zobrist_cell(r, c, old_owner, old_orb)
-
-    # apply move
-    owners[r, c] = player
-    orbs[r, c] += 1
-
-    # add new hash
-    h ^= zobrist_cell(r, c, owners[r, c], orbs[r, c])
-
-    # check explosion
     if orbs[r, c] >= CAPACITY[r, c]:
         stack.append((r, c))
 
-    # ===== chain reaction =====
     while stack:
         cr, cc = stack.pop()
 
@@ -139,48 +143,30 @@ def apply_move_fast(owners, orbs, hash_key, player, move):
             continue
 
         exploding_owner = cur_owner
-
-        # remove old state from hash
-        h ^= zobrist_cell(cr, cc, cur_owner, cur_orb)
-
         remaining = cur_orb - cap
 
         if remaining > 0:
-            orbs[cr, cc] = remaining
-            # owner stays same
-
-            # add new state
-            h ^= zobrist_cell(cr, cc, exploding_owner, remaining)
+            apply_cell(cr, cc, exploding_owner, remaining)
 
             if remaining >= cap:
                 stack.append((cr, cc))
-
         else:
-            orbs[cr, cc] = 0
-            owners[cr, cc] = -1
+            apply_cell(cr, cc, -1, 0)
 
-            # add empty state
-            h ^= zobrist_cell(cr, cc, -1, 0)
-
-        # ===== distribute to neighbours =====
         for nr, nc in NEIGHBOURS[(cr, cc)]:
-            n_owner = owners[nr, nc]
-            n_orb = orbs[nr, nc]
-
-            # remove old
-            h ^= zobrist_cell(nr, nc, n_owner, n_orb)
-
-            # apply
-            owners[nr, nc] = exploding_owner
-            orbs[nr, nc] += 1
-
-            # add new
-            h ^= zobrist_cell(nr, nc, owners[nr, nc], orbs[nr, nc])
+            apply_cell(nr, nc, exploding_owner, orbs[nr, nc] + 1)
 
             if orbs[nr, nc] >= CAPACITY[nr, nc]:
                 stack.append((nr, nc))
 
-    return owners, orbs, h
+    return changes, h
+
+
+# undo a move
+def undo_move(owners, orbs, changes):
+    for r, c, old_owner, old_orb in reversed(changes):
+        owners[r, c] = old_owner
+        orbs[r, c] = old_orb
 
 
 # quick moves, vectorized. returns (np.int64(r), np.uint64(c))
@@ -285,19 +271,20 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     current_player = player_id if maximizing else opponent
     alpha_orig = alpha
     # IMP : EVALUATING MOVES WRT CURRENT PLAYER
-    moves = get_valid_moves(owners, player_id)
+    moves = get_valid_moves(owners, current_player)
     if entry and entry[3] in moves:
         moves.remove(entry[3])
         moves.insert(0, entry[3])
-    moves = get_ordered_moves(owners, orbs, moves,player_id, maximizing)
+    moves = get_ordered_moves(owners, orbs, moves, current_player, maximizing)
     best_move = None
     best = 0
     if maximizing:
         
         best = float('-inf')
         for move in moves:
-            owners_copy, orbs_copy, inc_hash = apply_move_fast(owners, orbs, hash_key, current_player, move)
-            score = minimax(owners_copy, orbs_copy, inc_hash, player_id, depth-1, alpha, beta, False, start_time)
+            changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
+            score = minimax(owners, orbs, inc_hash,player_id, depth-1, alpha, beta, False, start_time)
+            undo_move(owners, orbs, changes)
             if (score > best):
                 best = score
                 best_move = move
@@ -308,8 +295,9 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
         best = float('inf') # worst for maximizer. 
         # enemy always playing best possible moves for himself,
         for move in moves:
-            owners_copy, orbs_copy, inc_hash = apply_move_fast(owners, orbs, hash_key, current_player, move)
-            score = minimax(owners_copy, orbs_copy, inc_hash, player_id, depth-1, alpha, beta, True, start_time)
+            changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
+            score = minimax(owners, orbs, inc_hash, player_id, depth-1, alpha, beta, True, start_time)
+            undo_move(owners, orbs, changes)
             if score < best:
                 best = score
                 best_move = move
@@ -346,8 +334,9 @@ def get_move(state, player_id : int):
         best_score = float('-inf')
         current_best = None
         for move in moves:
-            owners_copy, orbs_copy, inc_hash = apply_move_fast(owners, orbs, root_hash, player_id, move)
-            score = minimax(owners_copy, orbs_copy, inc_hash, player_id, depth, float('-inf'), float('inf'), False, start_time)
+            changes, inc_hash = make_move(owners, orbs, root_hash, player_id, move)
+            score = minimax(owners, orbs, inc_hash, player_id, depth, float('-inf'), float('inf'), False, start_time)
+            undo_move(owners, orbs, changes)
             if score > best_score : 
                 best_score = score
                 current_best = move
