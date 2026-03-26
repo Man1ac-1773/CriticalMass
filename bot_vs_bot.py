@@ -26,21 +26,21 @@ def main():
     for turn in range(max_turns):
         player = turn % 2
         
-        try:
-            start_time = time.time()
-            move = bots[player](game.get_state(), player)
-            # if time.time() - start_time > 1.0:
-                # raise Exception("Bot took too long to make a move (exceeded 1000ms)")
-            print(f"Turn {turn + 1}: Player {player} plays {move}")
+        
+        start_time = time.time()
+        move = bots[player](game.get_state(), player)
+        # if time.time() - start_time > 1.0:
+            # raise Exception("Bot took too long to make a move (exceeded 1000ms)")
+        print(f"Turn {turn + 1}: Player {player} plays {move}")
             
-            game.apply_move(player, move)
-            print_board(game.get_state())
+        game.apply_move(player, move)
+        print_board(game.get_state())
             
-        except Exception as e:
+        '''except Exception as e:
             winner = 1 - player
             print(f"Player {player} forfeits (crashed or made invalid move): {e}")
             print(f"Winner: Player {winner}")
-            return
+            return'''
 
         winner = game.check_winner()
         if winner is not None:
