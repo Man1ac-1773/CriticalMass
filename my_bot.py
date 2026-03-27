@@ -348,7 +348,11 @@ def get_move(state, player_id : int):
         else : 
             MAX_BRANCHES = 20
         moves = get_valid_moves(owners, player_id)
-        moves = get_ordered_moves(owners, orbs, moves, depth, player_id)
+        entry = TT.get(root_hash)
+        tt_move = None
+        if entry:
+            tt_move = entry[3]
+        moves = get_ordered_moves(owners, orbs, moves, depth, player_id, tt_move)
         best_score = float('-inf')
         current_best = None
         for move in moves:
