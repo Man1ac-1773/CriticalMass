@@ -3,6 +3,9 @@ from collections import deque
 from chain_reaction import ChainReactionGame
 import time
 import heapq
+# TELEMETRY
+NODES_EVAL = 0
+# ---
 ROWS, COLS = 12, 8
 MAX_BRANCHES = 25 # cap for branches in early game
 MAX_TT_SIZE = 200000 # cap for transposition table
@@ -273,6 +276,8 @@ def evaluate(owners, orbs, player_id):
 
 # Do minimax yayy
 def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, start_time, current_score):
+    global NODES_EVAL
+    NODES_EVAL += 1
     # time constraint
     if (time.time() - start_time >= 0.95):
         return current_score 
@@ -395,7 +400,8 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
 def get_move(state, player_id : int):
     owners, orbs = state_to_numpy(state) 
     TT.clear()
-    global MAX_BRANCHES
+    global MAX_BRANCHES, NODES_EVAL
+    NODES_EVAL = 0
     best_move = None
     start_time = time.time()
     root_hash = compute_hash(owners, orbs)
@@ -405,7 +411,6 @@ def get_move(state, player_id : int):
             root_score += get_cell_value(r, c, orbs[r][c], owners[r][c], player_id) 
     for depth in range(1, 15):
         if time.time() - start_time > 0.9:
-            print(f"Depth reached : {depth}")
             break
         moves = get_valid_moves(owners, player_id)
         entry = TT.get(root_hash)
@@ -423,8 +428,8 @@ def get_move(state, player_id : int):
                 best_score = score
                 current_best = move
         best_move = current_best
-        
-
     elapsed = time.time() - start_time 
+    nps = int(NODES_EVAL/elapsed) if elapsed > 0 else 0 
+    print(f" [Player {player_id}] Max Depth: {depth - 1} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
     return best_move
 
