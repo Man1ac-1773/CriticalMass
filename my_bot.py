@@ -339,7 +339,6 @@ def get_move(state, player_id : int):
     
     for depth in range(1, 10):
         if time.time() - start_time > 0.9:
-            print(f"Depth reached : {depth}")
             break
         if (depth >= 4):
             MAX_BRANCHES = 8
@@ -364,9 +363,6 @@ def get_move(state, player_id : int):
                 current_best = move
         best_move = current_best
         
-
-    elapsed = time.time() - start_time 
-    print(f"Moves available : {len(moves)}, Time elapsed : {elapsed}")
     return best_move
 
 
