@@ -4,7 +4,7 @@ from chain_reaction import ChainReactionGame
 import time
 import heapq
 ROWS, COLS = 12, 8
-MAX_BRANCHES = 20 # cap for branches in early game
+MAX_BRANCHES = 25 # cap for branches in early game
 MAX_TT_SIZE = 200000 # cap for transposition table
 _GAME = ChainReactionGame() # dummy, for utility
 
@@ -297,35 +297,69 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     moves = get_ordered_moves(owners, orbs, moves, current_player, depth, tt_move)
     best_move = None
     if maximizing:
-        
         best = float('-inf')
-        for move in moves:
+        for i, move in enumerate(moves):
             changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
-            score = minimax(owners, orbs, inc_hash, player_id, depth-1, alpha, beta, False, start_time)
+            
+            needs_full_search = True
+            is_killer = move in killer_moves[current_player][depth]
+            
+            # LMR Condition for Maximizer
+            # If we are deep enough, past the first 3 promising moves, and it's not a killer move
+            if depth >= 3 and i >= 3 and not is_killer:
+                # 1. Do a shallow search (depth - 2)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, False, start_time)
+                
+                # 2. If the shallow search surprisingly beats alpha, our ordering was wrong! 
+                # We must research it at full depth to get the exact value.
+                if score <= alpha:
+                    needs_full_search = False
+                    
+            if needs_full_search:
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, False, start_time)
+                
             undo_move(owners, orbs, changes)
-            if (score > best):
+            
+            if score > best:
                 best = score
                 best_move = move
             alpha = max(alpha, best)
-            if (beta <= alpha):
+            if beta <= alpha:
                 break
-    else : 
-        best = float('inf') # worst for maximizer. 
-        # enemy always playing best possible moves for himself,
-        for move in moves:
+                
+    else: 
+        best = float('inf') # worst for maximizer
+        for i, move in enumerate(moves):
             changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
-            score = minimax(owners, orbs, inc_hash, player_id, depth-1, alpha, beta, True, start_time)
+            
+            needs_full_search = True
+            is_killer = move in killer_moves[current_player][depth]
+            
+            # LMR Condition for Minimizer
+            if depth >= 3 and i >= 3 and not is_killer:
+                # 1. Shallow search (depth - 2)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, True, start_time)
+                
+                # 2. Minimizer wants to push the score DOWN. 
+                # If the shallow score drops below beta, it's a dangerous move and needs a full search.
+                if score >= beta: 
+                    needs_full_search = False
+                    
+            if needs_full_search:
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, True, start_time)
+                
             undo_move(owners, orbs, changes)
+            
             if score < best:
                 best = score
                 best_move = move
             beta = min(beta, best)
-            if beta <= alpha :
+            if beta <= alpha:
                 # caused a cutoff, therefore killer
                 if killer_moves[current_player][depth][0] != move:
                     killer_moves[current_player][depth][1] = killer_moves[current_player][depth][0]
                     killer_moves[current_player][depth][0] = move
-                break
+                break 
     
     # store TT
     if best <= alpha_orig:
@@ -351,13 +385,8 @@ def get_move(state, player_id : int):
     
     for depth in range(1, 10):
         if time.time() - start_time > 0.9:
+            print(f"Depth reached : {depth}")
             break
-        if (depth >= 4):
-            MAX_BRANCHES = 8
-        elif depth == 3:
-            MAX_BRANCHES = 12 
-        else : 
-            MAX_BRANCHES = 20
         moves = get_valid_moves(owners, player_id)
         entry = TT.get(root_hash)
         tt_move = None
