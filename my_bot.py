@@ -221,58 +221,6 @@ def check_winner(owners, orbs, player_id : int):
 # === ===
 
 
-# Evaluate how good the position is 
-def evaluate(owners, orbs, player_id):
-    my_cells = (owners == player_id)
-    opp_cells = (owners == 1 - player_id)
-    cell_diff = np.sum(my_cells) - np.sum(opp_cells)
-    orb_diff = np.sum(orbs[my_cells]) - np.sum(orbs[opp_cells])
-
-    volatility = orbs * INV_CAPACITY # minor improvement 
-    volatility_diff = np.sum(volatility[my_cells]) - np.sum(volatility[opp_cells])
-
-    threat_score = 0 # how much offensive pressure I am exerting
-    danger_score = 0 # how much offensive pressure is being exerted on me
-    for r in range(ROWS):
-        for c in range(COLS):
-            owner, _orbs = owners[r][c], orbs[r][c]
-            if owner != -1:
-                if (owner == player_id) :
-                    if CAPACITY[r][c] - _orbs <= 1:
-                        # I own this, add to threat
-                        for r1, c1 in NEIGHBOURS[(r,c)]:
-                            if owners[r1][c1] != -1 :
-                                if owners[r1][c1] == 1 - player_id:
-                                    # belongs to opponent
-                                    threat_score+=1
-
-                elif owner == 1 - player_id:
-                   # I don't own, add to dange
-                    if CAPACITY[r][c] - _orbs <= 1:
-                        for r1, c1 in NEIGHBOURS[(r,c)]:
-                            if owners[r1][c1] != -1 :
-                                if owners[r1][c1] == player_id:
-                                    # belongs to me 
-                                    danger_score+=1
-    
-    # everything counted, now score
-    cell_weight = 1.0 
-    _cell_score = cell_weight * (cell_diff/96)
-    # 96 is magic number representing hypothetical max difference
-    orbs_owned_weight = 1.5
-    _orb_score = orbs_owned_weight * (orb_diff/384) 
-    # magic number 384 represents all cells full with one particular type, max limit
-    vol_weight = 1.5
-    _vol_score = vol_weight * (volatility_diff/96)
-    # magic number 96 comes from all cells at max volatility
-    # for each cell which is my neighbour, my threat can be max one per cell
-    # what should my max be for scaling?
-    threat_score /= 96; danger_score /= 96 
-    _threat_weight = 2.5; _danger_weight = 2.5
-    threat_score *= _threat_weight; danger_score *= _danger_weight
-    final_score = _cell_score + _orb_score + _vol_score - danger_score + threat_score
-    return final_score
-
 
 # Do minimax yayy
 def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, start_time, current_score):
