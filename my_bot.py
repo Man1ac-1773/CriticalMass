@@ -1,3 +1,4 @@
+from typing_extensions import reveal_type
 import numpy as np
 from collections import deque
 from chain_reaction import ChainReactionGame
@@ -48,6 +49,11 @@ TT = {}
 # hash -> (depth, value, flag, move)
 # ==== ====
 
+# === KILLER MOVES ====
+MAX_SEARCH_DEPTH = 20 
+killer_moves = [[None, None] for _ in range(MAX_SEARCH_DEPTH)]
+
+
 # === HELPER FUNCTION ===
 # evaluate a potential move and return score of it
 def score_move(owners, orbs, move, player_id : int):
@@ -75,12 +81,26 @@ def score_move(owners, orbs, move, player_id : int):
     return final_score
 
 # return moves sorted by move_score
-def get_ordered_moves(owners, orbs, moves, player_id: int):
-    return heapq.nlargest(
-                MAX_BRANCHES, 
-                moves, 
-                lambda m : score_move(owners, orbs, m, player_id) 
-                )
+# what is this inconsistent type hinting
+# do not comment on my mood i'll slime
+def get_ordered_moves(owners, orbs, moves, player_id: int, depth : int, tt_move = None):
+    ordered = []
+    # i like TT move most
+    # it's my code after all 
+    if tt_move in moves: 
+        ordered.append(tt_move)
+        moves.remove(tt_move)
+
+    # now killer
+    for k_move in killer_moves:
+        if k_move is not None and k_move in moves:
+            ordered.append(k_move)
+            moves.remove(k_move)
+
+    # rest of moves
+    moves.sort(key=lambda m : score_move(owners, orbs, m, player_id), reverse=True)
+    ordered.extend(moves[:MAX_BRANCHES])
+    return ordered
 
 # Convert current board to two numpy arrays, owners and orbs
 def state_to_numpy(state) : 
@@ -261,12 +281,11 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     tt_move = None
     if entry and entry[3] in moves:
         tt_move = entry[3]
-        moves.remove(entry[3])
-    moves = get_ordered_moves(owners, orbs, moves, current_player)
-    if tt_move : moves.insert(0, tt_move)
+    
+    # handles tt move remove and adding
+    moves = get_ordered_moves(owners, orbs, moves, depth, current_player, tt_move)
     best_move = None
     if maximizing:
-        
         best = float('-inf')
         for move in moves:
             changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
@@ -281,6 +300,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     else : 
         best = float('inf') # worst for maximizer. 
         # enemy always playing best possible moves for himself,
+        # enemy is a retard
         for move in moves:
             changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
             score = minimax(owners, orbs, inc_hash, player_id, depth-1, alpha, beta, True, start_time)
@@ -288,7 +308,11 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             if score < best:
                 best = score
                 best_move = move
-            beta = min(beta, best)
+            if (best >= beta):
+                if killer_moves[depth][0] != move:
+                    killer_moves[depth][1] = killer_moves[depth][0]
+                    killer_moves[depth][0] = move
+                beta = best
             if beta <= alpha : break
     
     # store TT
@@ -324,7 +348,7 @@ def get_move(state, player_id : int):
         else : 
             MAX_BRANCHES = 20
         moves = get_valid_moves(owners, player_id)
-        moves = get_ordered_moves(owners, orbs,moves,  player_id)
+        moves = get_ordered_moves(owners, orbs, moves, depth, player_id)
         best_score = float('-inf')
         current_best = None
         for move in moves:
