@@ -342,39 +342,3 @@ def get_move(state, player_id : int):
     return best_move
 
 
-# verify your make_move matches the engine exactly
-from chain_reaction import ChainReactionGame
-from copy import deepcopy
-import random
-
-def verify_consistency(n_tests=500):
-    start = time.time() 
-
-    for _ in range(n_tests):
-        game = ChainReactionGame()
-        owners, orbs = state_to_numpy(game.get_state())
-        h = compute_hash(owners, orbs)
-        for turn in range(1000):
-            player = turn % 2
-            moves = get_valid_moves(owners, player)
-            move = random.choice(moves)
-            
-            # engine version
-            game2 = ChainReactionGame()
-            game2.board = deepcopy(game.board)
-            game2.moves_played = {0:1, 1:1}
-            game2.apply_move(player, move)
-            
-            # your version
-            changes, h = make_move(owners, orbs, h, player, move)
-            
-            eng_owners, eng_orbs = state_to_numpy(game2.board)
-            assert np.array_equal(owners, eng_owners), f"owners mismatch at turn {turn}, move {move}"
-            assert np.array_equal(orbs, eng_orbs), f"orbs mismatch at turn {turn}, move {move}"
-            
-            game.apply_move(player, move)
-        
-    print("All consistency checks passed")
-    print(f"Time elapsed : {time.time() - start}")
-
-verify_consistency()
