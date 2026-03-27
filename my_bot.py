@@ -1,4 +1,5 @@
 import numpy as np
+from collections import deque
 from chain_reaction import ChainReactionGame
 import time
 import heapq
@@ -6,6 +7,7 @@ ROWS, COLS = 12, 8
 MAX_BRANCHES = 20 # cap for branches in early game
 MAX_TT_SIZE = 200000 # cap for transposition table
 _GAME = ChainReactionGame() # dummy, for utility
+
 # precompute with _GAME to reduce overhead 
 CAPACITY = np.zeros((ROWS, COLS), dtype=np.int8)
 for r in range(ROWS):
@@ -22,7 +24,8 @@ for r in range(ROWS):
 
 
 # ==== ZOBRIST ==== 
-MAX_ORBS = 8 # some kind of safe upper limit
+MAX_ORBS = 4          # some kind of safe upper limit
+
 # zobrist is a 4 dimensional tensor 
 # used to store every possible position and combination
 ZOBRIST = np.random.randint(0, 2**64, size=(ROWS, COLS, 2, MAX_ORBS+1), dtype=np.uint64)
@@ -31,7 +34,8 @@ EMPTY_HASH = np.random.randint(0, 2**64, size=(ROWS, COLS), dtype=np.uint64)
 def zobrist_cell(r, c, owner, orb):
     if owner == -1:
         return EMPTY_HASH[r, c]
-    return ZOBRIST[r, c, owner, orb]
+    clamped = min(int(orb), CAPACITY[r,c])
+    return ZOBRIST[r, c, owner, clamped]
 
 def compute_hash(owners, orbs):
     h = np.uint64(0)
@@ -71,15 +75,8 @@ def score_move(owners, orbs, move, player_id : int):
     return final_score
 
 # return moves sorted by move_score
-def get_ordered_moves(owners, orbs, moves, player_id: int, maximizing):
-    if maximizing:
-        return heapq.nlargest(
-                MAX_BRANCHES, 
-                moves, 
-                lambda m : score_move(owners, orbs, m, player_id) 
-                )
-    else : 
-        return heapq.nsmallest(
+def get_ordered_moves(owners, orbs, moves, player_id: int):
+    return heapq.nlargest(
                 MAX_BRANCHES, 
                 moves, 
                 lambda m : score_move(owners, orbs, m, player_id) 
@@ -88,7 +85,7 @@ def get_ordered_moves(owners, orbs, moves, player_id: int, maximizing):
 # Convert current board to two numpy arrays, owners and orbs
 def state_to_numpy(state) : 
     owners = np.full((ROWS, COLS), -1, dtype=np.int8)
-    orbs = np.zeros((ROWS, COLS), dtype=np.int8)
+    orbs = np.zeros((ROWS, COLS), dtype=np.int16)
 
     for r in range(ROWS):
         for c in range(COLS):
@@ -103,64 +100,52 @@ def state_to_numpy(state) :
 def make_move(owners, orbs, hash_key, player, move):
     changes = []
     h = hash_key
-
-    stack = [move]
-
+    
     def apply_cell(r, c, new_owner, new_orb):
         nonlocal h
-
         old_owner = owners[r, c]
         old_orb = orbs[r, c]
-
         changes.append((r, c, old_owner, old_orb))
-
-        # remove old hash
         h ^= zobrist_cell(r, c, old_owner, old_orb)
-
-        # apply
         owners[r, c] = new_owner
         orbs[r, c] = new_orb
-
-        # add new hash
         h ^= zobrist_cell(r, c, new_owner, new_orb)
 
     r, c = move
-
-    # initial placement
     apply_cell(r, c, player, orbs[r, c] + 1)
-
+    
+    queue = deque()
     if orbs[r, c] >= CAPACITY[r, c]:
-        stack.append((r, c))
-
-    while stack:
-        cr, cc = stack.pop()
-
-        cur_owner = owners[cr, cc]
-        cur_orb = orbs[cr, cc]
-        cap = CAPACITY[cr, cc]
-
-        if cur_orb < cap:
+        queue.append((r, c))
+    
+    while queue:
+        cr, cc = queue.popleft()
+        
+        if orbs[cr, cc] < CAPACITY[cr, cc]:
             continue
-
-        exploding_owner = cur_owner
-        remaining = cur_orb - cap
-
+            
+        # MAJOR CHANGE
+        # win check — stop if opponent wiped out
+        if np.sum(owners == 1 - player) == 0:
+            break
+            
+        cap = CAPACITY[cr, cc]
+        exploding_owner = owners[cr, cc]
+        remaining = orbs[cr, cc] - cap
+        
         if remaining > 0:
             apply_cell(cr, cc, exploding_owner, remaining)
-
             if remaining >= cap:
-                stack.append((cr, cc))
+                queue.append((cr, cc))
         else:
             apply_cell(cr, cc, -1, 0)
-
+        
         for nr, nc in NEIGHBOURS[(cr, cc)]:
             apply_cell(nr, nc, exploding_owner, orbs[nr, nc] + 1)
-
-            if orbs[nr, nc] >= CAPACITY[nr, nc]:
-                stack.append((nr, nc))
-
+            if orbs[nr, nc] == CAPACITY[nr, nc]:  # match engine
+                queue.append((nr, nc))            # shitty design, honestly
+    
     return changes, h
-
 
 # undo a move
 def undo_move(owners, orbs, changes):
@@ -277,7 +262,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     if entry and entry[3] in moves:
         tt_move = entry[3]
         moves.remove(entry[3])
-    moves = get_ordered_moves(owners, orbs, moves, player_id, maximizing)
+    moves = get_ordered_moves(owners, orbs, moves, current_player)
     if tt_move : moves.insert(0, tt_move)
     best_move = None
     if maximizing:
@@ -285,7 +270,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
         best = float('-inf')
         for move in moves:
             changes, inc_hash = make_move(owners, orbs, hash_key, current_player, move)
-            score = minimax(owners, orbs, inc_hash,player_id, depth-1, alpha, beta, False, start_time)
+            score = minimax(owners, orbs, inc_hash, player_id, depth-1, alpha, beta, False, start_time)
             undo_move(owners, orbs, changes)
             if (score > best):
                 best = score
@@ -314,7 +299,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     else : 
         flag = "EXACT"
     TT[hash_key] = (depth, best, flag, best_move)
-    if (len(TT) > MAX_TT_SIZE):
+    if len(TT) > MAX_TT_SIZE:
         TT.clear() # prevent blowup of memory
     return best
 
@@ -323,6 +308,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
 def get_move(state, player_id : int):
     owners, orbs = state_to_numpy(state) 
     TT.clear()
+    global MAX_BRANCHES
     best_move = None
     start_time = time.time()
     root_hash = compute_hash(owners, orbs)
@@ -331,8 +317,14 @@ def get_move(state, player_id : int):
         if time.time() - start_time > 0.9:
             print(f"Depth reached : {depth}")
             break
+        if (depth >= 4):
+            MAX_BRANCHES = 8
+        elif depth == 3:
+            MAX_BRANCHES = 12 
+        else : 
+            MAX_BRANCHES = 20
         moves = get_valid_moves(owners, player_id)
-        moves = get_ordered_moves(owners, orbs,moves,  player_id, True)
+        moves = get_ordered_moves(owners, orbs,moves,  player_id)
         best_score = float('-inf')
         current_best = None
         for move in moves:
@@ -346,5 +338,43 @@ def get_move(state, player_id : int):
         
 
     elapsed = time.time() - start_time 
-    print(f"Time elapsed : {elapsed}")
+    print(f"Moves available : {len(moves)}, Time elapsed : {elapsed}")
     return best_move
+
+
+# verify your make_move matches the engine exactly
+from chain_reaction import ChainReactionGame
+from copy import deepcopy
+import random
+
+def verify_consistency(n_tests=500):
+    start = time.time() 
+
+    for _ in range(n_tests):
+        game = ChainReactionGame()
+        owners, orbs = state_to_numpy(game.get_state())
+        h = compute_hash(owners, orbs)
+        for turn in range(1000):
+            player = turn % 2
+            moves = get_valid_moves(owners, player)
+            move = random.choice(moves)
+            
+            # engine version
+            game2 = ChainReactionGame()
+            game2.board = deepcopy(game.board)
+            game2.moves_played = {0:1, 1:1}
+            game2.apply_move(player, move)
+            
+            # your version
+            changes, h = make_move(owners, orbs, h, player, move)
+            
+            eng_owners, eng_orbs = state_to_numpy(game2.board)
+            assert np.array_equal(owners, eng_owners), f"owners mismatch at turn {turn}, move {move}"
+            assert np.array_equal(orbs, eng_orbs), f"orbs mismatch at turn {turn}, move {move}"
+            
+            game.apply_move(player, move)
+        
+    print("All consistency checks passed")
+    print(f"Time elapsed : {time.time() - start}")
+
+verify_consistency()
