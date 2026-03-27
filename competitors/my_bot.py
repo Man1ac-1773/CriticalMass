@@ -363,5 +363,8 @@ def get_move(state, player_id : int):
                 current_best = move
         best_move = current_best
         
+
+    elapsed = time.time() - start_time 
     return best_move
+
 
