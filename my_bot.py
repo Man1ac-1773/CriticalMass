@@ -248,15 +248,17 @@ def get_valid_moves(owners, player_id : int):
     return [i for i in range(CELLS) if owners[i] == player_id or owners[i] == -1] 
 
 # change to state info. O(1) eval instead of O(N)
-def check_winner(state_info):
+def check_winner(state_info, root_player):
     p0_count, p1_count, total_orbs = state_info
     
     if total_orbs < 2: 
         return None
         
-    if p0_count > 0 and p1_count == 0: return True
-    elif p1_count > 0 and p0_count == 0: return False
-    else: return None
+    if p0_count > 0 and p1_count == 0: 
+        return 10000 if root_player == 0 else -10000
+    elif p1_count > 0 and p0_count == 0: 
+        return 10000 if root_player == 1 else -10000
+    return None
 
 # === ===
 
@@ -283,11 +285,9 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             if alpha >= beta:
                 return val
     # terminal
-    win = check_winner(state_info)
-    if win is not None:
-        if win: 
-            return 10000
-        else: return -10000
+    win_score = check_winner(state_info, player_id)
+    if win_score is not None:
+        return win_score    
     # base condition
     if depth == 0:
         TT[hash_key] = (depth, current_score, "EXACT", None)
@@ -413,6 +413,7 @@ def get_move(state, player_id : int):
             break
         
         moves = get_valid_moves(owners, player_id)
+        if best_move is None and moves : best_move = moves[0] # fallback
         entry = TT.get(root_hash)
         tt_move = None
         if entry and entry[3] in moves:
