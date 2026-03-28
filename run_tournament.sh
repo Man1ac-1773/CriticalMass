@@ -12,6 +12,8 @@ rm -f competitors/*_bot.py
 BRANCHES=(
     "master" # Usually your stable baseline
     "bench-v3"
+    "bench-v2"
+    "bench-v1"
 )
 
 echo "--- Assembling Competitors ---"
