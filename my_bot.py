@@ -143,12 +143,13 @@ def state_to_1d(state) :
 
 
 # inplace editing wrt move and updating hash 
-def make_move(owners : list[int], orbs : list[int], hash_key, current_player : int, move_idx : int, root_player : int):
+def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, current_player : int, move_idx : int, root_player : int, state_info : tuple[int, int ,int]) -> tuple[list[tuple[int, int, int]], np.uint64 , float, tuple[int, int, int]] : 
     changes = []
     h = hash_key
-    score_delta = 0.0 
+    score_delta = 0.0
+    p0, p1, total_orbs = state_info
     def apply_cell(idx, new_owner, new_orb):
-        nonlocal h, score_delta
+        nonlocal h, score_delta, p0, p1
         old_owner = owners[idx]
         old_orb = orbs[idx]
         score_delta -= get_cell_value(idx, old_orb, old_owner, root_player)
@@ -158,7 +159,13 @@ def make_move(owners : list[int], orbs : list[int], hash_key, current_player : i
         orbs[idx] = new_orb
         h ^= zobrist_cell(idx, new_owner, new_orb)
         score_delta += get_cell_value(idx, new_orb, new_owner, root_player)
-
+        # O(1) Counter updates
+        if old_owner != new_owner:
+            if old_owner == 0: p0 -= 1
+            elif old_owner == 1: p1 -= 1
+            if new_owner == 0: p0 += 1
+            elif new_owner == 1: p1 += 1
+    
     apply_cell(move_idx, current_player, orbs[move_idx] + 1)
     
     queue = deque()
@@ -171,15 +178,10 @@ def make_move(owners : list[int], orbs : list[int], hash_key, current_player : i
         if orbs[curr] < CAPACITY[curr]:
             continue
             
-        # win check logic in pure python
-        opp_alive = False
-        for owner in owners:
-            if owner == 1 - current_player:
-                opp_alive = True
-                break
-        if not opp_alive:
-            break 
-            
+        # O(1) Win check mid-explosion using our local counters
+        if current_player == 0 and p1 == 0: break
+        if current_player == 1 and p0 == 0: break
+           
         cap = CAPACITY[curr]
         exploding_owner = owners[curr]
         remaining = orbs[curr] - cap
@@ -196,7 +198,7 @@ def make_move(owners : list[int], orbs : list[int], hash_key, current_player : i
             if orbs[n_idx] == CAPACITY[n_idx]:  # match engine
                 queue.append(n_idx)            # shitty design, honestly
     
-    return changes, h, score_delta
+    return changes, h, score_delta, (p0, p1, total_orbs + 1)
 
 # undo a move
 def undo_move(owners, orbs, changes):
@@ -209,16 +211,15 @@ def undo_move(owners, orbs, changes):
 def get_valid_moves(owners, player_id : int):
     return [i for i in range(CELLS) if owners[i] == player_id or owners[i] == -1] 
 
-# return to native python
-def check_winner(owners, orbs, player_id : int):
-    if sum(orbs) < 2:
+# change to state info. O(1) eval instead of O(N)
+def check_winner(state_info):
+    p0_count, p1_count, total_orbs = state_info
+    
+    if total_orbs < 2: 
         return None
-    
-    a = owners.count(player_id)
-    b = owners.count(1 - player_id)
-    
-    if a > 0 and b == 0: return True
-    elif a == 0 and b > 0: return False
+        
+    if p0_count > 0 and p1_count == 0: return True
+    elif p1_count > 0 and p0_count == 0: return False
     else: return None
 
 # === ===
@@ -226,7 +227,7 @@ def check_winner(owners, orbs, player_id : int):
 
 
 # Do minimax yayy
-def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, start_time, current_score):
+def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, start_time, current_score, state_info):
     global NODES_EVAL
     NODES_EVAL += 1
     # time constraint
@@ -246,7 +247,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             if alpha >= beta:
                 return val
     # terminal
-    win = check_winner(owners, orbs, player_id)
+    win = check_winner(state_info)
     if win is not None:
         if win: 
             return 10000
@@ -271,7 +272,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     if maximizing:
         best = float('-inf')
         for i, move in enumerate(moves):
-            changes, inc_hash, d_score = make_move(owners, orbs, hash_key, current_player, move, player_id)
+            changes, inc_hash, d_score, next_state = make_move(owners, orbs, hash_key, current_player, move, player_id, state_info)
             new_score = current_score + d_score
             
             needs_full_search = True
@@ -281,7 +282,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             # If we are deep enough, past the first 3 promising moves, and it's not a killer move
             if depth >= 3 and i >= 3 and not is_killer:
                 # 1. Do a shallow search (depth - 2)
-                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, False, start_time, new_score)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, False, start_time, new_score, next_state)
                 
                 # 2. If the shallow search surprisingly beats alpha, our ordering was wrong! 
                 # We must research it at full depth to get the exact value.
@@ -289,7 +290,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
                     needs_full_search = False
                     
             if needs_full_search:
-                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, False, start_time, new_score)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, False, start_time, new_score, next_state)
                 
             undo_move(owners, orbs, changes)
             
@@ -303,7 +304,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     else: 
         best = float('inf') # worst for maximizer
         for i, move in enumerate(moves):
-            changes, inc_hash, d_score = make_move(owners, orbs, hash_key, current_player, move, player_id)
+            changes, inc_hash, d_score, next_state = make_move(owners, orbs, hash_key, current_player, move, player_id, state_info)
             new_score = current_score + d_score 
             needs_full_search = True
             is_killer = move in killer_moves[current_player][depth]
@@ -311,7 +312,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             # LMR Condition for Minimizer
             if depth >= 3 and i >= 3 and not is_killer:
                 # 1. Shallow search (depth - 2)
-                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, True, start_time, new_score)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, True, start_time, new_score, next_state)
                 
                 # 2. Minimizer wants to push the score DOWN. 
                 # If the shallow score drops below beta, it's a dangerous move and needs a full search.
@@ -319,7 +320,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
                     needs_full_search = False
                     
             if needs_full_search:
-                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, True, start_time, new_score)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, True, start_time, new_score, next_state)
                 
             undo_move(owners, orbs, changes)
             
@@ -353,33 +354,47 @@ def get_move(state, player_id : int):
     TT.clear()
     global MAX_BRANCHES, NODES_EVAL
     NODES_EVAL = 0
+    
     best_move = None
+    
     start_time = time.time()
+    
+
     root_hash = compute_hash(owners, orbs)
     root_score = 0.0
+    
+
     for curr in range(CELLS):
         root_score += get_cell_value(curr, orbs[curr], owners[curr], player_id) 
+    
+    root_state = (owners.count(0), owners.count(1), sum(orbs))
+
     for depth in range(1, 15):
         if time.time() - start_time > 0.9:
             break
+        
         moves = get_valid_moves(owners, player_id)
         entry = TT.get(root_hash)
         tt_move = None
         if entry and entry[3] in moves:
             tt_move = entry[3]
+        
         moves = get_ordered_moves(owners, orbs,moves, player_id, depth, tt_move)
         best_score = float('-inf')
         current_best = None
+        
         for move in moves:
-            changes, inc_hash, d_score = make_move(owners, orbs, root_hash, player_id, move, player_id)
-            score = minimax(owners, orbs, inc_hash, player_id, depth, float('-inf'), float('inf'), False, start_time, root_score + d_score)
+            changes, inc_hash, d_score, next_state = make_move(owners, orbs, root_hash, player_id, move, player_id, root_state)
+            score = minimax(owners, orbs, inc_hash, player_id, depth, float('-inf'), float('inf'), False, start_time, root_score + d_score, next_state)
             undo_move(owners, orbs, changes)
             if score > best_score : 
                 best_score = score
                 current_best = move
         best_move = current_best
+    
+
     elapsed = time.time() - start_time 
     nps = int(NODES_EVAL/elapsed) if elapsed > 0 else 0 
-    print(f" [Player {player_id}] Max Depth: {depth - 1} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
+    print(f"[Player {player_id}] Max Depth: {depth - 1} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
     return (best_move // COLS, best_move % COLS)
 
