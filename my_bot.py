@@ -393,7 +393,7 @@ def get_move(state, player_id : int):
         moves = get_ordered_moves(owners, orbs,moves, player_id, depth, tt_move)
         best_score = float('-inf')
         current_best = None
-        
+        is_aborted = False 
         for move in moves:
             changes, inc_hash, d_score, next_state = make_move(owners, orbs, root_hash, player_id, move, player_id, root_state)
             score = minimax(owners, orbs, inc_hash, player_id, depth, float('-inf'), float('inf'), False, start_time, root_score + d_score, next_state)
@@ -401,6 +401,10 @@ def get_move(state, player_id : int):
             if score > best_score : 
                 best_score = score
                 current_best = move
+            if time.time() - start_time > 0.95:
+                is_aborted = True
+        if is_aborted:
+            break
         best_move = current_best
     
 
