@@ -68,7 +68,7 @@ VOL_W = 1.5 / 96.0
 CORNER_W = 0.02
 EDGE_W = 0.005
 THREAT_W = 0.004   # heavy penalty 
-DANGER_W = 0.006
+DANGER_W = 0.004
 SUPPORT_W = 0.003  # bonus 
 
 def get_base_value(idx, orb_count, owner, root_player):
@@ -291,7 +291,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
     # terminal
     win_score = check_winner(state_info, player_id)
     if win_score is not None:
-        return win_score    
+        return win_score + depth if win_score > 0 else win_score - depth    
     # base condition
     if depth == 0:
         TT[hash_key] = (depth, current_score, "EXACT", None)
