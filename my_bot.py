@@ -434,6 +434,6 @@ def get_move(state, player_id : int):
 
     elapsed = time.time() - start_time 
     nps = int(NODES_EVAL/elapsed) if elapsed > 0 else 0 
-    print(f"[Player {player_id}] Max Depth: {depth - 1} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
+    print(f"Max Depth: {depth} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
     return (best_move // COLS, best_move % COLS)
 
