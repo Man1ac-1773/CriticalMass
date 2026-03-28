@@ -30,7 +30,7 @@ for r in range(ROWS):
 # ==== ZOBRIST ==== 
 MAX_ORBS = 4          # some kind of safe upper limit
 
-# zobrist is a 4 dimensional tensor 
+# zobrist is a 3 dimensional tensor 
 # used to store every possible position and combination
 ZOBRIST = np.random.randint(0, 2**64, size=(CELLS, 3, MAX_ORBS+1), dtype=np.uint64)
 
@@ -49,6 +49,7 @@ def compute_hash(owners, orbs):
 TT = {}
 # hash -> (depth, value, flag, move)
 # ==== ====
+
 # === KILLER ====
 MAX_SEARCH_DEPTH = 20
 killer_moves = {
@@ -60,20 +61,50 @@ killer_moves = {
 
 
 # === HELPER FUNCTION ===
+# weights depending on ownership
 CELL_W = 1.0 / 96.0
 ORB_W = 1.5 / 384.0
 VOL_W = 1.5 / 96.0
+CORNER_W = 0.015
+EDGE_W = 0.005
+THREAT_W = 0.03   # heavy penalty 
+SUPPORT_W = 0.01  # bonus 
 
-def get_cell_value(idx, orb_count, owner, root_player):
-    # raw value of cell from root player perspective 
-    if owner == -1:
-        return 0.0
-        
-    # Positive if it's our cell, negative if it's the opponent's
-    sign = 1.0 if owner == root_player else -1.0
+def get_base_value(idx, orb_count, owner, root_player):
+    """ The isolated value of the cell ignoring its neighbors. """
+    if owner == -1: return 0.0
     
     val = CELL_W + (orb_count * ORB_W) + (orb_count * INV_CAPACITY[idx] * VOL_W)
-    return sign * val
+    
+    # Real estate value
+    if CAPACITY[idx] == 2: val += CORNER_W
+    elif CAPACITY[idx] == 3: val += EDGE_W
+    
+    return val if owner == root_player else -val
+
+def evaluate_edge(idx1, o1, orb1, idx2, o2, orb2, root_player):
+    """ The tactical relationship (Threat/Danger/Support) between two adjacent cells. 
+        It assumes that the cells passed are adjacent. That safety is left upto caller."""
+    if o1 == -1 or o2 == -1: return 0.0
+
+    c1_crit = (orb1 == CAPACITY[idx1] - 1)
+    c2_crit = (orb2 == CAPACITY[idx2] - 1)
+    val = 0.0
+
+    if o1 != o2:
+        # Enemy Edge
+        # If cell 1 is critical, it threatens cell 2 (Good for owner 1)
+        if c1_crit:
+            val += THREAT_W if o1 == root_player else -THREAT_W
+        # If cell 2 is critical, it threatens cell 1 (Good for owner 2)
+        if c2_crit:
+            val += THREAT_W if o2 == root_player else -THREAT_W
+    else:
+        # Friendly Edge (Domino Effect)
+        if c1_crit and c2_crit:
+            val += SUPPORT_W if o1 == root_player else -SUPPORT_W
+
+    return val
 
 # evaluate a potential move and return score of it
 def score_move(owners, orbs, move_idx, player_id : int):
@@ -128,7 +159,7 @@ def get_ordered_moves(owners, orbs, moves: list[int], player_id: int, depth : in
         
     return ordered
 
-# Convert current board to two numpy arrays, owners and orbs
+# Convert current board to two arrays, owners and orbs
 def state_to_1d(state) : 
     owners = [-1]  * CELLS
     orbs = [0] * CELLS
@@ -152,19 +183,24 @@ def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, curren
         nonlocal h, score_delta, p0, p1
         old_owner = owners[idx]
         old_orb = orbs[idx]
-        score_delta -= get_cell_value(idx, old_orb, old_owner, root_player)
+        score_delta -= get_base_value(idx, old_orb, old_owner, root_player)
+        for n in NEIGHBOURS[idx]:
+            score_delta -= evaluate_edge(idx, old_owner, old_orb, n, owners[n], orbs[n], root_player)
         changes.append((idx, old_owner, old_orb))
         h ^= zobrist_cell(idx, old_owner, old_orb)
         owners[idx] = new_owner
         orbs[idx] = new_orb
         h ^= zobrist_cell(idx, new_owner, new_orb)
-        score_delta += get_cell_value(idx, new_orb, new_owner, root_player)
+        
         # O(1) Counter updates
         if old_owner != new_owner:
             if old_owner == 0: p0 -= 1
             elif old_owner == 1: p1 -= 1
             if new_owner == 0: p0 += 1
             elif new_owner == 1: p1 += 1
+        score_delta += get_base_value(idx, new_orb, new_owner, root_player)
+        for n in NEIGHBOURS[idx]:
+            score_delta += evaluate_edge(idx, old_owner, old_orb, n, owners[n], orbs[n], root_player)
     
     apply_cell(move_idx, current_player, orbs[move_idx] + 1)
     
@@ -365,7 +401,10 @@ def get_move(state, player_id : int):
     
 
     for curr in range(CELLS):
-        root_score += get_cell_value(curr, orbs[curr], owners[curr], player_id) 
+        root_score += get_base_value(curr, orbs[curr], owners[curr], player_id)
+        for n in NEIGHBOURS[curr]:
+            if n > curr:
+                root_score += evaluate_edge(curr, owners[curr], orbs[curr], n, owners[n], orbs[n], player_id)
     
     root_state = (owners.count(0), owners.count(1), sum(orbs))
 
