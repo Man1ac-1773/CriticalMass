@@ -65,10 +65,11 @@ killer_moves = {
 CELL_W = 1.0 / 96.0
 ORB_W = 1.5 / 384.0
 VOL_W = 1.5 / 96.0
-CORNER_W = 0.015
+CORNER_W = 0.02
 EDGE_W = 0.005
-THREAT_W = 0.03   # heavy penalty 
-SUPPORT_W = 0.01  # bonus 
+THREAT_W = 0.004   # heavy penalty 
+DANGER_W = 0.006
+SUPPORT_W = 0.003  # bonus 
 
 def get_base_value(idx, orb_count, owner, root_player):
     """ The isolated value of the cell ignoring its neighbors. """
@@ -83,8 +84,6 @@ def get_base_value(idx, orb_count, owner, root_player):
     return val if owner == root_player else -val
 
 def evaluate_edge(idx1, o1, orb1, idx2, o2, orb2, root_player):
-    """ The tactical relationship (Threat/Danger/Support) between two adjacent cells. 
-        It assumes that the cells passed are adjacent. That safety is left upto caller."""
     if o1 == -1 or o2 == -1: return 0.0
 
     c1_crit = (orb1 == CAPACITY[idx1] - 1)
@@ -92,15 +91,18 @@ def evaluate_edge(idx1, o1, orb1, idx2, o2, orb2, root_player):
     val = 0.0
 
     if o1 != o2:
-        # Enemy Edge
-        # If cell 1 is critical, it threatens cell 2 (Good for owner 1)
-        if c1_crit:
+        # Enemy Interaction
+        # If o1 is critical and o2 is not, o1 threatens o2
+        if c1_crit and not c2_crit:
             val += THREAT_W if o1 == root_player else -THREAT_W
-        # If cell 2 is critical, it threatens cell 1 (Good for owner 2)
-        if c2_crit:
-            val += THREAT_W if o2 == root_player else -THREAT_W
+        # If o2 is critical and o1 is not, o2 threatens o1 (danger to o1)
+        if c2_crit and not c1_crit:
+            val -= DANGER_W if o1 == root_player else -DANGER_W
+            
+        # If BOTH are critical, the one whose turn it is wins. Alpha-beta handles this naturally via depth, 
+        # so we apply NO static penalty here to avoid the "Cowardice" bug.
     else:
-        # Friendly Edge (Domino Effect)
+        # Friendly Interaction (Building Dominoes)
         if c1_crit and c2_crit:
             val += SUPPORT_W if o1 == root_player else -SUPPORT_W
 
@@ -149,8 +151,12 @@ def get_ordered_moves(owners, orbs, moves: list[int], player_id: int, depth : in
     # 3. Evaluate and sort the rest using fast heapq
     remaining = list(moves_set)
     if remaining:
-        remaining.sort(key = lambda m : score_move(owners, orbs, m, player_id), reverse=True) 
-        ordered.extend(remaining)
+        best_remaining = heapq.nlargest(
+                MAX_BRANCHES - len(ordered),
+                remaining, 
+                key = lambda m : score_move(owners, orbs, m, player_id)
+                ) 
+        ordered.extend(best_remaining)
         
     return ordered
 
@@ -178,9 +184,11 @@ def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, curren
         nonlocal h, score_delta, p0, p1
         old_owner = owners[idx]
         old_orb = orbs[idx]
+        
         score_delta -= get_base_value(idx, old_orb, old_owner, root_player)
         for n in NEIGHBOURS[idx]:
             score_delta -= evaluate_edge(idx, old_owner, old_orb, n, owners[n], orbs[n], root_player)
+        
         changes.append((idx, old_owner, old_orb))
         h ^= zobrist_cell(idx, old_owner, old_orb)
         owners[idx] = new_owner
@@ -193,6 +201,7 @@ def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, curren
             elif old_owner == 1: p1 -= 1
             if new_owner == 0: p0 += 1
             elif new_owner == 1: p1 += 1
+        
         score_delta += get_base_value(idx, new_orb, new_owner, root_player)
         for n in NEIGHBOURS[idx]:
             score_delta += evaluate_edge(idx, old_owner, old_orb, n, owners[n], orbs[n], root_player)
