@@ -11,7 +11,9 @@ rm -f competitors/*_bot.py
 # You can use branch names, tags, or raw commit hashes
 BRANCHES=(
     "master" # Usually your stable baseline
-    "HEAD"  # Whatever you are currently working on
+    "bench-v1"
+    "bench-v2"
+    "bench-v3"
 )
 
 echo "--- Assembling Competitors ---"
