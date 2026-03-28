@@ -149,13 +149,8 @@ def get_ordered_moves(owners, orbs, moves: list[int], player_id: int, depth : in
     # 3. Evaluate and sort the rest using fast heapq
     remaining = list(moves_set)
     if remaining:
-        # Only evaluate the static scores for moves we haven't already grabbed
-        best_remaining = heapq.nlargest(
-            MAX_BRANCHES - len(ordered), 
-            remaining, 
-            key=lambda m: score_move(owners, orbs, m, player_id)
-        )
-        ordered.extend(best_remaining)
+        remaining.sort(key = lambda m : score_move(owners, orbs, m, player_id), reverse=True) 
+        ordered.extend(remaining)
         
     return ordered
 
