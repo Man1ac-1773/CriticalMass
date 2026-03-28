@@ -7,44 +7,43 @@ import heapq
 NODES_EVAL = 0
 # ---
 ROWS, COLS = 12, 8
+CELLS = ROWS * COLS
 MAX_BRANCHES = 25 # cap for branches in early game
 MAX_TT_SIZE = 200000 # cap for transposition table
 _GAME = ChainReactionGame() # dummy, for utility
 
 # precompute with _GAME to reduce overhead 
-CAPACITY = np.zeros((ROWS, COLS), dtype=np.int8)
+CAPACITY = [0] * CELLS 
+INV_CAPACITY = [0.0] * CELLS 
+NEIGHBOURS = [() for _ in range (CELLS)]
+
 for r in range(ROWS):
     for c in range(COLS):
-        CAPACITY[r][c] = _GAME.capacity(r, c)
-
-INV_CAPACITY = 1/CAPACITY
-
-# neighbours as a dict 
-NEIGHBOURS = {}
-for r in range(ROWS):
-    for c in range(COLS):
-        NEIGHBOURS[(r,c)] = _GAME.neighbors(r, c)
-
+        idx = r*COLS + c
+        CAPACITY[idx] = _GAME.capacity(r,c)
+        INV_CAPACITY[idx] = 1.0/CAPACITY[idx]
+        n_list = []
+        for nr, nc in _GAME.neighbors(r,c):
+            n_list.append(nr* COLS + nc)
+            NEIGHBOURS[idx] = tuple(n_list)
 
 # ==== ZOBRIST ==== 
 MAX_ORBS = 4          # some kind of safe upper limit
 
 # zobrist is a 4 dimensional tensor 
 # used to store every possible position and combination
-ZOBRIST = np.random.randint(0, 2**64, size=(ROWS, COLS, 2, MAX_ORBS+1), dtype=np.uint64)
-EMPTY_HASH = np.random.randint(0, 2**64, size=(ROWS, COLS), dtype=np.uint64)
+ZOBRIST = np.random.randint(0, 2**64, size=(CELLS, 3, MAX_ORBS+1), dtype=np.uint64)
 
-def zobrist_cell(r, c, owner, orb):
-    if owner == -1:
-        return EMPTY_HASH[r, c]
-    clamped = min(int(orb), CAPACITY[r,c])
-    return ZOBRIST[r, c, owner, clamped]
+def zobrist_cell(idx : int, owner : int, orb : int):
+     o_idx = 2 if owner == -1 else owner
+     clamped = min(orb, 4)
+     return ZOBRIST[idx, o_idx, clamped]
+
 
 def compute_hash(owners, orbs):
     h = np.uint64(0)
-    for r in range(ROWS):
-        for c in range(COLS):
-            h ^= zobrist_cell(r, c, owners[r,c], orbs[r,c])
+    for cell in range(CELLS):
+        h ^= zobrist_cell(cell, owners[cell], orbs[cell])
     return h
 
 TT = {}
@@ -65,7 +64,7 @@ CELL_W = 1.0 / 96.0
 ORB_W = 1.5 / 384.0
 VOL_W = 1.5 / 96.0
 
-def get_cell_value(r, c, orb_count, owner, root_player):
+def get_cell_value(idx, orb_count, owner, root_player):
     # raw value of cell from root player perspective 
     if owner == -1:
         return 0.0
@@ -73,36 +72,35 @@ def get_cell_value(r, c, orb_count, owner, root_player):
     # Positive if it's our cell, negative if it's the opponent's
     sign = 1.0 if owner == root_player else -1.0
     
-    val = CELL_W + (orb_count * ORB_W) + (orb_count * INV_CAPACITY[r][c] * VOL_W)
+    val = CELL_W + (orb_count * ORB_W) + (orb_count * INV_CAPACITY[idx] * VOL_W)
     return sign * val
 
 # evaluate a potential move and return score of it
-def score_move(owners, orbs, move, player_id : int):
+def score_move(owners, orbs, move_idx, player_id : int):
     # assume am receiving a valid move
     final_score = 0 
-    r, c = move
-    if orbs[r][c] >= CAPACITY[r][c] - 1:
+    if orbs[move_idx] >= CAPACITY[move_idx] - 1:
         final_score += 300
         # check if this explosion is near opponents 
-        for nr, nc in NEIGHBOURS[(r,c)]:
-            if owners[nr][nc] == 1 - player_id:
-               if orbs[nr][nc] >= CAPACITY[nr][nc] - 1:
+        for neighbor in NEIGHBOURS[move_idx]:
+            if owners[neighbor] == 1 - player_id:
+                if orbs[neighbor] >= CAPACITY[neighbor] - 1:
                    final_score += 200
     else : 
-        for nr, nc in NEIGHBOURS[(r,c)]:
-            if owners[nr][nc] == 1 - player_id:
-                if orbs[nr][nc] >= CAPACITY[nr][nc] - 1:
+        for neighbor in NEIGHBOURS[move_idx]:
+            if owners[neighbor] == 1 - player_id:
+                if orbs[neighbor] >= CAPACITY[neighbor] - 1:
                     final_score -= 50 
                     # penalise for opponents near explosion but I am not
     
-    if CAPACITY[r][c] == 2:
+    if CAPACITY[move_idx] == 2:
         final_score += 100 # reward corner
-    elif CAPACITY[r][c] == 3:
+    elif CAPACITY[move_idx] == 3:
         final_score += 50 # somewhat reward edge
     return final_score
 
 # return moves sorted by move_score
-def get_ordered_moves(owners, orbs, moves, player_id: int, depth : int, tt_move = None):
+def get_ordered_moves(owners, orbs, moves: list[int], player_id: int, depth : int, tt_move = None):
     ordered = []
     moves_set = set(moves) 
     
@@ -131,92 +129,97 @@ def get_ordered_moves(owners, orbs, moves, player_id: int, depth : int, tt_move 
     return ordered
 
 # Convert current board to two numpy arrays, owners and orbs
-def state_to_numpy(state) : 
-    owners = np.full((ROWS, COLS), -1, dtype=np.int8)
-    orbs = np.zeros((ROWS, COLS), dtype=np.int16)
-
+def state_to_1d(state) : 
+    owners = [-1]  * CELLS
+    orbs = [0] * CELLS
     for r in range(ROWS):
         for c in range(COLS):
             owner, orbs_cell = state[r][c]
             if owner is not None:
-                owners[r,c] = owner
-                orbs[r, c] = orbs_cell
+                idx = r* COLS + c
+                owners[idx] = owner
+                orbs[idx] = orbs_cell
     return owners, orbs
 
 
 # inplace editing wrt move and updating hash 
-def make_move(owners, orbs, hash_key, current_player, move, root_player):
+def make_move(owners : list[int], orbs : list[int], hash_key, current_player : int, move_idx : int, root_player : int):
     changes = []
     h = hash_key
     score_delta = 0.0 
-    def apply_cell(r, c, new_owner, new_orb):
+    def apply_cell(idx, new_owner, new_orb):
         nonlocal h, score_delta
-        old_owner = owners[r, c]
-        old_orb = orbs[r, c]
-        score_delta -= get_cell_value(r, c, old_orb, old_owner, root_player)
-        changes.append((r, c, old_owner, old_orb))
-        h ^= zobrist_cell(r, c, old_owner, old_orb)
-        owners[r, c] = new_owner
-        orbs[r, c] = new_orb
-        h ^= zobrist_cell(r, c, new_owner, new_orb)
-        score_delta += get_cell_value(r, c, new_orb, new_owner, root_player)
+        old_owner = owners[idx]
+        old_orb = orbs[idx]
+        score_delta -= get_cell_value(idx, old_orb, old_owner, root_player)
+        changes.append((idx, old_owner, old_orb))
+        h ^= zobrist_cell(idx, old_owner, old_orb)
+        owners[idx] = new_owner
+        orbs[idx] = new_orb
+        h ^= zobrist_cell(idx, new_owner, new_orb)
+        score_delta += get_cell_value(idx, new_orb, new_owner, root_player)
 
-    r, c = move
-    apply_cell(r, c, current_player, orbs[r, c] + 1)
+    apply_cell(move_idx, current_player, orbs[move_idx] + 1)
     
     queue = deque()
-    if orbs[r, c] >= CAPACITY[r, c]:
-        queue.append((r, c))
+    if orbs[move_idx] >= CAPACITY[move_idx]:
+        queue.append(move_idx)
     
     while queue:
-        cr, cc = queue.popleft()
+        curr = queue.popleft()
         
-        if orbs[cr, cc] < CAPACITY[cr, cc]:
+        if orbs[curr] < CAPACITY[curr]:
             continue
             
-        # MAJOR CHANGE
-        # win check — stop if opponent wiped out
-        if np.sum(owners == 1 - current_player) == 0:
-            break
+        # win check logic in pure python
+        opp_alive = False
+        for owner in owners:
+            if owner == 1 - current_player:
+                opp_alive = True
+                break
+        if not opp_alive:
+            break 
             
-        cap = CAPACITY[cr, cc]
-        exploding_owner = owners[cr, cc]
-        remaining = orbs[cr, cc] - cap
+        cap = CAPACITY[curr]
+        exploding_owner = owners[curr]
+        remaining = orbs[curr] - cap
         
         if remaining > 0:
-            apply_cell(cr, cc, exploding_owner, remaining)
+            apply_cell(curr, exploding_owner, remaining)
             if remaining >= cap:
-                queue.append((cr, cc))
+                queue.append(curr)
         else:
-            apply_cell(cr, cc, -1, 0)
+            apply_cell(curr, -1, 0)
         
-        for nr, nc in NEIGHBOURS[(cr, cc)]:
-            apply_cell(nr, nc, exploding_owner, orbs[nr, nc] + 1)
-            if orbs[nr, nc] == CAPACITY[nr, nc]:  # match engine
-                queue.append((nr, nc))            # shitty design, honestly
+        for n_idx in NEIGHBOURS[curr]:
+            apply_cell(n_idx, exploding_owner, orbs[n_idx] + 1)
+            if orbs[n_idx] == CAPACITY[n_idx]:  # match engine
+                queue.append(n_idx)            # shitty design, honestly
     
     return changes, h, score_delta
 
 # undo a move
 def undo_move(owners, orbs, changes):
-    for r, c, old_owner, old_orb in reversed(changes):
-        owners[r, c] = old_owner
-        orbs[r, c] = old_orb
+    for idx, old_owner, old_orb in reversed(changes):
+        owners[idx] = old_owner
+        orbs[idx] = old_orb
 
 
-# quick moves, vectorized. returns (np.int64(r), np.uint64(c))
+# new 1d version, faster than numpy (tested)
 def get_valid_moves(owners, player_id : int):
-    mask = (owners == player_id) | (owners == -1)
-    return list(zip(*np.where(mask))) 
+    return [i for i in range(CELLS) if owners[i] == player_id or owners[i] == -1] 
 
+# return to native python
 def check_winner(owners, orbs, player_id : int):
-    if (np.sum(orbs) < 2):
+    if sum(orbs) < 2:
         return None
-    a = np.sum(owners == player_id)
-    b = np.sum(owners == 1 - player_id)
-    if a > 0 and b == 0 : return True
-    elif a == 0 and b > 0 : return False
-    else : return None
+    
+    a = owners.count(player_id)
+    b = owners.count(1 - player_id)
+    
+    if a > 0 and b == 0: return True
+    elif a == 0 and b > 0: return False
+    else: return None
 
 # === ===
 
@@ -316,7 +319,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
                     needs_full_search = False
                     
             if needs_full_search:
-                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, True, start_time, current_score)
+                score = minimax(owners, orbs, inc_hash, player_id, depth - 1, alpha, beta, True, start_time, new_score)
                 
             undo_move(owners, orbs, changes)
             
@@ -346,7 +349,7 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
 
 # actual function called
 def get_move(state, player_id : int):
-    owners, orbs = state_to_numpy(state) 
+    owners, orbs = state_to_1d(state) 
     TT.clear()
     global MAX_BRANCHES, NODES_EVAL
     NODES_EVAL = 0
@@ -354,9 +357,8 @@ def get_move(state, player_id : int):
     start_time = time.time()
     root_hash = compute_hash(owners, orbs)
     root_score = 0.0
-    for r in range(ROWS):
-        for c in range(COLS):
-            root_score += get_cell_value(r, c, orbs[r][c], owners[r][c], player_id) 
+    for curr in range(CELLS):
+        root_score += get_cell_value(curr, orbs[curr], owners[curr], player_id) 
     for depth in range(1, 15):
         if time.time() - start_time > 0.9:
             break
@@ -379,5 +381,5 @@ def get_move(state, player_id : int):
     elapsed = time.time() - start_time 
     nps = int(NODES_EVAL/elapsed) if elapsed > 0 else 0 
     print(f" [Player {player_id}] Max Depth: {depth - 1} | Nodes: {NODES_EVAL:<8} | NPS: {nps}")
-    return best_move
+    return (best_move // COLS, best_move % COLS)
 
