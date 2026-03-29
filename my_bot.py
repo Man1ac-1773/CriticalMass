@@ -3,9 +3,7 @@ from collections import deque
 from chain_reaction import ChainReactionGame
 import time
 import heapq
-# TELEMETRY
-NODES_EVAL = 0
-# ---
+
 ROWS, COLS = 12, 8
 CELLS = ROWS * COLS
 MAX_BRANCHES = 25 # cap for branches in early game
@@ -28,7 +26,7 @@ for r in range(ROWS):
             NEIGHBOURS[idx] = tuple(n_list)
 
 # ==== ZOBRIST ==== 
-MAX_ORBS = 4          # some kind of safe upper limit
+MAX_ORBS = 4  
 
 # zobrist is a 3 dimensional tensor 
 # used to store every possible position and combination
@@ -60,7 +58,6 @@ killer_moves = {
 # ==== ====
 
 
-# === HELPER FUNCTION ===
 # weights depending on ownership
 CELL_W = 1.0 / 96.0
 ORB_W = 1.5 / 384.0
@@ -69,6 +66,7 @@ CORNER_W = 0.02
 EDGE_W = 0.005
 
 
+# === HELPER FUNCTION ===
 def get_base_value(idx, orb_count, owner, root_player):
     """ The isolated value of the cell ignoring its neighbors. """
     if owner == -1: return 0.0
@@ -110,18 +108,15 @@ def get_ordered_moves(owners, orbs, moves: list[int], player_id: int, depth : in
     ordered = []
     moves_set = set(moves) 
     
-    # 1. TT Move is king
     if tt_move in moves_set:
         ordered.append(tt_move)
         moves_set.remove(tt_move)
         
-    # 2. Player-specific Killer Moves for this depth
     for km in killer_moves[player_id][depth]:
         if km in moves_set:
             ordered.append(km)
             moves_set.remove(km)
             
-    # 3. Evaluate and sort the rest using fast heapq
     remaining = list(moves_set)
     if remaining:
         best_remaining = heapq.nlargest(
@@ -166,7 +161,7 @@ def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, curren
         orbs[idx] = new_orb
         h ^= zobrist_cell(idx, new_owner, new_orb)
         
-        # O(1) Counter updates
+        # counter updates
         if old_owner != new_owner:
             if old_owner == 0: p0 -= 1
             elif old_owner == 1: p1 -= 1
@@ -187,7 +182,7 @@ def make_move(owners : list[int], orbs : list[int], hash_key : np.uint64, curren
         if orbs[curr] < CAPACITY[curr]:
             continue
             
-        # O(1) Win check mid-explosion using our local counters
+        # O(1) win check mid-explosion using our local counters
         if current_player == 0 and p1 == 0: break
         if current_player == 1 and p0 == 0: break
            
@@ -220,7 +215,7 @@ def undo_move(owners, orbs, changes):
 def get_valid_moves(owners, player_id : int):
     return [i for i in range(CELLS) if owners[i] == player_id or owners[i] == -1] 
 
-# change to state info. O(1) eval instead of O(N)
+# changed to state info. O(1) eval instead of O(N)
 def check_winner(state_info, root_player):
     p0_count, p1_count, total_orbs = state_info
     
@@ -287,14 +282,9 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             needs_full_search = True
             is_killer = move in killer_moves[current_player][depth]
             
-            # LMR Condition for Maximizer
-            # If we are deep enough, past the first 3 promising moves, and it's not a killer move
             if depth >= 3 and i >= 3 and not is_killer:
-                # 1. Do a shallow search (depth - 2)
                 score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, False, start_time, new_score, next_state)
                 
-                # 2. If the shallow search surprisingly beats alpha, our ordering was wrong! 
-                # We must research it at full depth to get the exact value.
                 if score <= alpha:
                     needs_full_search = False
                     
@@ -318,13 +308,9 @@ def minimax(owners, orbs, hash_key ,player_id, depth, alpha, beta, maximizing, s
             needs_full_search = True
             is_killer = move in killer_moves[current_player][depth]
             
-            # LMR Condition for Minimizer
             if depth >= 3 and i >= 3 and not is_killer:
-                # 1. Shallow search (depth - 2)
                 score = minimax(owners, orbs, inc_hash, player_id, depth - 2, alpha, beta, True, start_time, new_score, next_state)
                 
-                # 2. Minimizer wants to push the score DOWN. 
-                # If the shallow score drops below beta, it's a dangerous move and needs a full search.
                 if score >= beta: 
                     needs_full_search = False
                     
@@ -403,6 +389,7 @@ def get_move(state, player_id : int):
                 current_best = move
             if time.time() - start_time > 0.95:
                 is_aborted = True
+                break
         if is_aborted:
             break
         best_move = current_best
