@@ -4,6 +4,7 @@ from chain_reaction import ChainReactionGame
 import time
 import heapq
 
+NODES_EVAL = 0
 ROWS, COLS = 12, 8
 CELLS = ROWS * COLS
 MAX_BRANCHES = 25 # cap for branches in early game

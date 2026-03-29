@@ -9,6 +9,7 @@ rm -f competitors/*_bot.py
 
 # 2. Define your combatants here
 # You can use branch names, tags, or raw commit hashes
+
 BRANCHES=(
     "master" # Usually your stable baseline
     "bench-v3"

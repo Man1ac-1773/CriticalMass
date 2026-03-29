@@ -1,4 +1,4 @@
-resources/
+__pycache__
 competitors/
 dummy*
 random*
