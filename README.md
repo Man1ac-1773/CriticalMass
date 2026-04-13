@@ -5,6 +5,10 @@ A python bot that plays the chain reaction game.
 Designed for the competition "Critical Mass" hosted by NJACK ML, IIT Patna. 
 It features a simple minimax with alpha beta pruning, highly optimized by using transposition tables (with zobrist hashing), iterative deepening, killer move heuristics, and late move reduction. 
 
+## Update
+
+Came second in the competition yayy
+
 ## Repo structure
 ### Resources `resources/`
 Contains the official game resources provided. 
